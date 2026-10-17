@@ -1,0 +1,18 @@
+---
+- name: Diagnostic du serveur Zabbix
+  hosts: zabbix
+  gather_facts: true
+  become: false
+
+  tasks:
+    - name: Afficher le nom du serveur
+      ansible.builtin.debug:
+        msg: "Nom du serveur : {{ ansible_hostname }}"
+
+    - name: Afficher le système d'exploitation
+      ansible.builtin.debug:
+        msg: "OS : {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Afficher l'adresse IPv4 principale
+      ansible.builtin.debug:
+        msg: "Adresse IPv4 : {{ ansible_default_ipv4.address }}"

@@ -1,0 +1,53 @@
+
+---
+- name: Configurer le frontend Web Zabbix
+  hosts: zabbix
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Vérifier la présence du modèle officiel
+      ansible.builtin.stat:
+        path: /usr/share/zabbix/ui/conf/zabbix.conf.php.example
+      register: zabbix_frontend_template
+
+    - name: Vérifier la présence de la configuration existante
+      ansible.builtin.stat:
+        path: "{{ zabbix_frontend_config_path }}"
+      register: zabbix_frontend_config
+
+    - name: Vérifier que le modèle est disponible
+      ansible.builtin.assert:
+        that:
+          - zabbix_frontend_template.stat.exists
+        fail_msg: "Le modèle officiel du frontend Zabbix est absent."
+
+    - name: Générer la configuration du frontend si elle est absente
+      ansible.builtin.template:
+        src: zabbix.conf.php.j2
+        dest: "{{ zabbix_frontend_config_path }}"
+        owner: "{{ zabbix_frontend_config_owner }}"
+        group: "{{ zabbix_frontend_config_group }}"
+        mode: "{{ zabbix_frontend_config_mode }}"
+        backup: true
+      when: not zabbix_frontend_config.stat.exists
+      no_log: true
+
+    - name: Vérifier la syntaxe PHP de la configuration
+      ansible.builtin.command:
+        argv:
+          - php
+          - -l
+          - "{{ zabbix_frontend_config_path }}"
+      changed_when: false
+
+    - name: Vérifier la disponibilité HTTP du frontend
+      ansible.builtin.uri:
+        url: http://localhost/zabbix/
+        method: GET
+        status_code:
+          - 200
+          - 301
+          - 302
+      register: zabbix_frontend_http
+      changed_when: false

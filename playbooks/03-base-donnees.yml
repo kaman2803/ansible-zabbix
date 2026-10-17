@@ -1,0 +1,76 @@
+
+---
+- name: Préparer la base de données Zabbix
+  hosts: zabbix
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Créer la base de données Zabbix
+      ansible.mysql.mysql_db:
+        name: zabbix
+        encoding: utf8mb4
+        collation: utf8mb4_bin
+        state: present
+        login_unix_socket: /run/mysqld/mysqld.sock
+
+    - name: Créer l'utilisateur MariaDB de Zabbix
+      ansible.mysql.mysql_user:
+        name: zabbix
+        password: "{{ zabbix_db_password }}"
+        priv: "zabbix.*:ALL"
+        host: localhost
+        state: present
+        login_unix_socket: /run/mysqld/mysqld.sock
+
+    - name: Compter les tables existantes dans la base Zabbix
+      ansible.builtin.command:
+        argv:
+          - mariadb
+          - -N
+          - -e
+          - "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='zabbix';"
+      register: zabbix_table_count
+      changed_when: false
+
+    - name: Vérifier le marqueur d'importation du schéma
+      ansible.builtin.stat:
+        path: /var/lib/zabbix/.schema-imported
+      register: zabbix_schema_marker
+
+    - name: Vérifier que l'état de la base permet l'importation
+      ansible.builtin.assert:
+        that:
+          - >-
+            (zabbix_table_count.stdout | trim == '0'
+            and not zabbix_schema_marker.stat.exists)
+            or
+            (zabbix_table_count.stdout | trim != '0'
+            and zabbix_schema_marker.stat.exists)
+        fail_msg: >-
+          État incohérent : la base contient des tables sans marqueur
+          d'importation, ou le marqueur existe alors que la base est vide.
+          Vérifier la base avant toute importation.
+
+    - name: Importer le schéma SQL initial de Zabbix
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          gzip -dc /usr/share/zabbix/sql-scripts/mysql/server.sql.gz
+          | mariadb zabbix
+        executable: /bin/bash
+      when:
+        - zabbix_table_count.stdout | trim == '0'
+        - not zabbix_schema_marker.stat.exists
+      register: zabbix_schema_import
+
+    - name: Créer automatiquement le marqueur après importation réussie
+      ansible.builtin.file:
+        path: /var/lib/zabbix/.schema-imported
+        state: touch
+        owner: root
+        group: root
+        mode: '0644'
+      when:
+        - zabbix_schema_import is not skipped
+        - zabbix_schema_import is succeeded

@@ -1,0 +1,155 @@
+---
+- name: Preparation du systeme pour le deploiement de Zabbix
+  hosts: zabbix
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Afficher les informations du systeme cible
+      ansible.builtin.debug:
+        msg:
+          - "Serveur : {{ ansible_hostname }}"
+          - "Distribution : {{ ansible_distribution }}"
+          - "Version : {{ ansible_distribution_version }}"
+          - "Architecture : {{ ansible_architecture }}"
+
+    - name: Verifier que le systeme cible utilise Ubuntu 24.04
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version == "24.04"
+        fail_msg: "Le serveur doit utiliser Ubuntu 24.04."
+        success_msg: "Systeme valide : Ubuntu 24.04."
+
+    - name: Verifier l'espace disque de la partition racine
+      ansible.builtin.command:
+        argv:
+          - df
+          - -h
+          - /
+      register: resultat_disque
+      changed_when: false
+
+    - name: Afficher l'espace disque
+      ansible.builtin.debug:
+        var: resultat_disque.stdout_lines
+
+    - name: Verifier la memoire et le swap
+      ansible.builtin.command:
+        argv:
+          - free
+          - -h
+      register: resultat_memoire
+      changed_when: false
+
+    - name: Afficher la memoire et le swap
+      ansible.builtin.debug:
+        var: resultat_memoire.stdout_lines
+
+    - name: Verifier la connectivite IP vers Internet
+      ansible.builtin.command:
+        argv:
+          - ping
+          - -c
+          - "2"
+          - -W
+          - "3"
+          - 1.1.1.1
+      register: resultat_connectivite
+      changed_when: false
+    
+    - name: Verifier la resolution DNS
+      ansible.builtin.command:
+        argv:
+          - getent
+          - hosts
+          - repo.zabbix.com
+      register: resultat_dns
+      changed_when: false
+    
+    - name: Verifier l'acces HTTPS au depot Zabbix
+      ansible.builtin.uri:
+        url: https://repo.zabbix.com/
+        method: GET
+        status_code: 200
+        return_content: false
+      register: resultat_https
+      changed_when: false
+
+    - name: Afficher les resultats des controles reseau
+      ansible.builtin.debug:
+        msg:
+          - "Connectivite IP : {{ 'OK' if resultat_connectivite.rc == 0 else 'ECHEC' }}"
+          - "Resolution DNS : {{ resultat_dns.stdout }}"
+          - "Acces HTTPS au depot Zabbix : HTTP {{ resultat_https.status }}"
+    
+    - name: Ajouter le depot officiel Zabbix 7.4
+      ansible.builtin.apt:
+        deb: "https://repo.zabbix.com/zabbix/7.4/release/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest+ubuntu24.04_all.deb"
+        state: present
+
+    - name: Actualiser le cache APT
+      ansible.builtin.apt:
+        update_cache: true
+    
+    - name: Verifier les versions disponibles des paquets Zabbix
+      ansible.builtin.command:
+        argv:
+          - apt-cache
+          - policy
+          - zabbix-server-mysql
+          - zabbix-frontend-php
+          - zabbix-apache-conf
+      register: resultat_paquets_zabbix
+      changed_when: false
+    
+    - name: Afficher les versions disponibles
+      ansible.builtin.debug:
+        var: resultat_paquets_zabbix.stdout_lines
+    
+    - name: Installer les paquets necessaires a Zabbix
+      ansible.builtin.apt:
+        name:
+          - zabbix-server-mysql
+          - zabbix-sql-scripts
+          - zabbix-frontend-php
+          - zabbix-apache-conf
+          - mariadb-server
+          - apache2
+          - php-mysql
+        state: present
+    
+    - name: Verifier les paquets installes
+      ansible.builtin.command:
+        argv:
+          - dpkg-query
+          - -W
+          - '-f=${binary:Package} ${Version} ${db:Status-Abbrev}\n'
+          - zabbix-server-mysql
+          - zabbix-sql-scripts
+          - zabbix-frontend-php
+          - zabbix-apache-conf
+          - mariadb-server
+          - apache2
+          - php-mysql
+      register: resultat_verification_paquets
+      changed_when: false
+
+    - name: Afficher les paquets installes
+      ansible.builtin.debug:
+        var: resultat_verification_paquets.stdout_lines
+
+    - name: Verifier l'etat des services
+      ansible.builtin.shell: |
+        for service in mariadb apache2 zabbix-server; do
+            printf "%-15s : " "$service"
+            systemctl is-active "$service" 2>/dev/null || true
+        done
+      register: resultat_verification_services
+      changed_when: false
+
+    - name: Afficher l'etat des services
+      ansible.builtin.debug:
+        var: resultat_verification_services.stdout_lines
+    
+    

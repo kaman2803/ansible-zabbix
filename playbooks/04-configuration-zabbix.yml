@@ -1,0 +1,54 @@
+
+---
+- name: Configurer et démarrer le serveur Zabbix
+  hosts: zabbix
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Configurer le nom de la base de données
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: '^[#\s]*DBName='
+        line: 'DBName=zabbix'
+        backup: true
+      notify: Redémarrer Zabbix Server
+
+    - name: Configurer l'utilisateur de la base de données
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: '^[#\s]*DBUser='
+        line: 'DBUser=zabbix'
+        backup: true
+      notify: Redémarrer Zabbix Server
+
+    - name: Configurer le mot de passe de la base de données
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: '^[#\s]*DBPassword='
+        line: "DBPassword={{ zabbix_db_password }}"
+        backup: true
+      no_log: true
+      notify: Redémarrer Zabbix Server
+
+    - name: Activer et démarrer Zabbix Server
+      ansible.builtin.service:
+        name: zabbix-server
+        enabled: true
+        state: started
+
+    - name: Vérifier que Zabbix Server est actif
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - zabbix-server
+      register: zabbix_service_status
+      changed_when: false
+      failed_when: zabbix_service_status.stdout | trim != 'active'
+
+  handlers:
+    - name: Redémarrer Zabbix Server
+      ansible.builtin.service:
+        name: zabbix-server
+        state: restarted
